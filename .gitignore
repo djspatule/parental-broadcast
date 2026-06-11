@@ -1,0 +1,19 @@
+# PlatformIO build artifacts
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+
+# Audio files — record your own voice and place them in data/
+# (keeping them out of version control avoids binary bloat)
+data/*.wav
+data/*.mp3
+data/*.m4a
+
+# Don't commit credentials
+# (edit src/main.cpp directly and never push with real passwords)

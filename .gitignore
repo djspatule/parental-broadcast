@@ -17,3 +17,5 @@ data/*.m4a
 
 # Don't commit credentials
 # (edit src/main.cpp directly and never push with real passwords)
+build/
+littlefs.bin

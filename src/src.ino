@@ -9,7 +9,7 @@
 // WIFI CONFIGURATION
 // =========================
 
-const char* WIFI_SSID = "YOUR_WIFI_SSID";
+const char* WIFI_SSID = "#M+L";
 const char* WIFI_PASS = "YOUR_WIFI_PASSWORD";
 
 const char* MDNS_NAME = "interphone-enfants";

@@ -588,6 +588,11 @@ String htmlManage() {
     "<input type='file' name='file' accept='.wav' required>"
     "<button type='submit'>Envoyer</button>"
     "</form>"
+    "<hr style='border-color:#333;margin:28px 0'>"
+    "<h2>Système</h2>"
+    "<a href='/reboot' onclick=\"return confirm('Redémarrer l\\'ESP32 ?')\" "
+    "style='display:inline-block;padding:10px 20px;background:#555;color:#fff;"
+    "border-radius:8px;text-decoration:none;font-size:.95rem'>🔄 Redémarrer l'ESP32</a>"
     "</body></html>");
 
   return html;
@@ -634,6 +639,7 @@ void handleVolume() {
   if (v < 0.0f || v > 3.0f) { server.send(400, "text/plain", "value must be 0.0-3.0"); return; }
   VOLUME = v;
   Serial.printf("Volume: %.2f\n", VOLUME);
+  { File f = LittleFS.open("/volume.txt", "w"); if (f) { f.print(VOLUME, 4); f.close(); } }
   server.send(200, "text/plain", String(VOLUME, 2));
 }
 
@@ -717,6 +723,13 @@ void handleUploadDone() {
   server.send(303, "text/plain", "OK");
 }
 
+void handleReboot() {
+  server.send(200, "text/html; charset=utf-8",
+    "<p>Redémarrage en cours… <a href='/'>Retour</a></p>");
+  delay(500);
+  ESP.restart();
+}
+
 void handleFavicon() {
   server.send(200, "image/svg+xml",
     "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>"
@@ -744,6 +757,9 @@ void setup() {
     if (f) { f.print(DEFAULT_LABELS); f.close(); }
   }
   loadLabels();
+
+  // Restore saved volume
+  { File f = LittleFS.open("/volume.txt", "r"); if (f) { VOLUME = f.readString().toFloat(); f.close(); Serial.printf("Volume restored: %.2f\n", VOLUME); } }
 
   // Print files
   Serial.println("Files in LittleFS:");
@@ -784,6 +800,7 @@ void setup() {
   server.on("/delete",  HTTP_GET,  handleDelete);
   server.on("/upload",      HTTP_POST, handleUploadDone, handleUploadChunk);
   server.on("/favicon.ico", HTTP_GET,  handleFavicon);
+  server.on("/reboot",      HTTP_GET,  handleReboot);
   server.onNotFound(handleNotFound);
 
   server.begin();

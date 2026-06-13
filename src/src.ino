@@ -394,7 +394,7 @@ bool isSafeStem(const String& stem) {
 String htmlPage() {
   String html = F("<!doctype html><html lang='fr'><head>"
     "<meta charset='utf-8'><title>Interphone enfants</title>"
-    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<meta name='viewport' content='width=device-width,initial-scale=1'><link rel='icon' href='/favicon.ico'>"
     "<style>"
     ":root{font-family:system-ui,-apple-system,sans-serif}"
     "body{margin:0;background:#111;color:#f5f5f5}"
@@ -463,7 +463,7 @@ String htmlPage() {
 String htmlLog() {
   String html = F("<!doctype html><html lang='fr'><head>"
     "<meta charset='utf-8'><title>Journal</title>"
-    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<meta name='viewport' content='width=device-width,initial-scale=1'><link rel='icon' href='/favicon.ico'>"
     "<style>"
     "body{font-family:system-ui,sans-serif;background:#111;color:#f5f5f5;margin:0;padding:20px}"
     "h1{font-size:1.5rem}a{color:#2f80ed}"
@@ -535,7 +535,7 @@ String htmlManage() {
 
   String html = F("<!doctype html><html lang='fr'><head>"
     "<meta charset='utf-8'><title>Gérer les messages</title>"
-    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<meta name='viewport' content='width=device-width,initial-scale=1'><link rel='icon' href='/favicon.ico'>"
     "<style>"
     "body{font-family:system-ui,sans-serif;background:#111;color:#f5f5f5;margin:0;padding:20px}"
     "h1,h2{font-size:1.3rem}a{color:#2f80ed}"
@@ -717,6 +717,12 @@ void handleUploadDone() {
   server.send(303, "text/plain", "OK");
 }
 
+void handleFavicon() {
+  server.send(200, "image/svg+xml",
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>"
+    "<text y='.9em' font-size='90'>🧒</text></svg>");
+}
+
 void handleNotFound() {
   server.send(404, "text/plain", "Not found");
 }
@@ -776,7 +782,8 @@ void setup() {
   server.on("/log",     HTTP_GET,  handleLog);
   server.on("/manage",  HTTP_GET,  handleManage);
   server.on("/delete",  HTTP_GET,  handleDelete);
-  server.on("/upload",  HTTP_POST, handleUploadDone, handleUploadChunk);
+  server.on("/upload",      HTTP_POST, handleUploadDone, handleUploadChunk);
+  server.on("/favicon.ico", HTTP_GET,  handleFavicon);
   server.onNotFound(handleNotFound);
 
   server.begin();

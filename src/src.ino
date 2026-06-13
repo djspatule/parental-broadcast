@@ -180,6 +180,15 @@ String htmlPage() {
       color: #ddd;
       min-height: 1.2rem;
     }
+    .log-link {
+      display: block;
+      margin-top: 20px;
+      text-align: center;
+      color: #888;
+      font-size: 0.9rem;
+      text-decoration: none;
+    }
+    .log-link:hover { color: #bbb; }
   </style>
 </head>
 <body>
@@ -203,6 +212,8 @@ String htmlPage() {
     </div>
 
     <div id="status">Prêt.</div>
+
+    <a href="/log" class="log-link">📋 Journal des messages</a>
   </main>
 
   <script>

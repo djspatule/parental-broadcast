@@ -4,12 +4,13 @@
 #include <ESPmDNS.h>
 #include <LittleFS.h>
 #include "driver/i2s.h"
+#include <time.h>
 
 // =========================
 // WIFI CONFIGURATION
 // =========================
 
-const char* WIFI_SSID = "#M+L";
+const char* WIFI_SSID = "YOUR_WIFI_SSID";
 const char* WIFI_PASS = "YOUR_WIFI_PASSWORD";
 
 const char* MDNS_NAME = "interphone-enfants";
@@ -24,8 +25,7 @@ const char* MDNS_NAME = "interphone-enfants";
 #define I2S_LRC  25
 #define I2S_DOUT 22
 
-// Software volume: 0.0 to 1.0
-// Start low, especially if the speaker is close to the bed.
+// Software volume: 0.0 to 3.0  (>1.0 clips but is louder)
 float VOLUME = 0.45;
 
 // =========================
@@ -35,6 +35,62 @@ float VOLUME = 0.45;
 WebServer server(80);
 
 bool isPlaying = false;
+
+// =========================
+// DAILY LOG
+// =========================
+
+#define LOG_FILE "/playlog.txt"
+
+String getToday() {
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) return "unknown";
+  char buf[11];
+  strftime(buf, sizeof(buf), "%Y-%m-%d", &timeinfo);
+  return String(buf);
+}
+
+void incrementLog() {
+  String today = getToday();
+  if (today == "unknown") return;
+
+  // Read existing log
+  String content = "";
+  File f = LittleFS.open(LOG_FILE, "r");
+  if (f) {
+    content = f.readString();
+    f.close();
+  }
+
+  // Parse lines, find today, increment or append
+  bool found = false;
+  String output = "";
+  int start = 0;
+  while (start < (int)content.length()) {
+    int nl = content.indexOf('\n', start);
+    if (nl == -1) nl = content.length();
+    String line = content.substring(start, nl);
+    line.trim();
+    if (line.length() > 0) {
+      int sp = line.indexOf(' ');
+      if (sp > 0) {
+        String date  = line.substring(0, sp);
+        int    count = line.substring(sp + 1).toInt();
+        if (date == today) {
+          output += today + " " + String(count + 1) + "\n";
+          found = true;
+        } else {
+          output += line + "\n";
+        }
+      }
+    }
+    start = nl + 1;
+  }
+  if (!found) output += today + " 1\n";
+
+  File fw = LittleFS.open(LOG_FILE, "w");
+  if (fw) { fw.print(output); fw.close(); }
+}
 
 // =========================
 // HTML PAGE
@@ -94,6 +150,28 @@ String htmlPage() {
     .warning {
       background: #b84040;
     }
+    .volume-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 20px 0 8px;
+    }
+    .volume-row label {
+      white-space: nowrap;
+      color: #bbb;
+      font-size: 0.95rem;
+      min-width: 90px;
+    }
+    input[type=range] {
+      flex: 1;
+      accent-color: #2f80ed;
+    }
+    #vol-val {
+      color: #f5f5f5;
+      min-width: 36px;
+      text-align: right;
+      font-size: 0.95rem;
+    }
     #status {
       margin-top: 16px;
       padding: 12px;
@@ -113,9 +191,16 @@ String htmlPage() {
     <button onclick="play('retour_lit')">Retour au lit</button>
     <button onclick="play('stop_courir')">Arrêtez de courir</button>
     <button onclick="play('separez_vous')">Séparez-vous</button>
-    <button onclick="play('tout_va_bien')" class="secondary">Tout va bien ?</button>
-    <button onclick="play('papa_arrive')" class="secondary">Papa arrive</button>
+    <button onclick="play('tout_va_bien')" class="secondary">Tout va bien</button>
+    <button onclick="play('papa_arrive')" class="secondary">Parents arrivent mécontents</button>
     <button onclick="play('dernier_avertissement')" class="warning">Dernier avertissement</button>
+
+    <div class="volume-row">
+      <label for="vol">Volume :</label>
+      <input type="range" id="vol" min="0" max="3" step="0.05" value="0.45"
+             oninput="updateVolDisplay(this.value)" onchange="setVolume(this.value)">
+      <span id="vol-val">0.45</span>
+    </div>
 
     <div id="status">Prêt.</div>
   </main>
@@ -123,21 +208,32 @@ String htmlPage() {
   <script>
     async function play(msg) {
       const status = document.getElementById('status');
-      status.textContent = "Sending: " + msg + "...";
-
+      status.textContent = "Envoi : " + msg + "...";
       try {
         const res = await fetch('/play?msg=' + encodeURIComponent(msg));
         const text = await res.text();
-
-        if (res.ok) {
-          status.textContent = "Message sent.";
-        } else {
-          status.textContent = "Error: " + text;
-        }
+        status.textContent = res.ok ? "Message envoyé." : "Erreur : " + text;
       } catch (e) {
-        status.textContent = "Cannot reach ESP32.";
+        status.textContent = "Impossible de joindre l'ESP32.";
       }
     }
+
+    function updateVolDisplay(v) {
+      document.getElementById('vol-val').textContent = parseFloat(v).toFixed(2);
+    }
+
+    async function setVolume(v) {
+      updateVolDisplay(v);
+      await fetch('/volume?value=' + v);
+    }
+
+    // Fetch current volume on load so slider matches actual state
+    fetch('/status').then(r => r.json()).then(d => {
+      if (d.volume !== undefined) {
+        document.getElementById('vol').value = d.volume;
+        updateVolDisplay(d.volume);
+      }
+    }).catch(() => {});
   </script>
 </body>
 </html>
@@ -327,7 +423,6 @@ bool playWav(const char* path) {
   const size_t INPUT_BUF_SIZE = 512;
   uint8_t inputBuffer[INPUT_BUF_SIZE];
 
-  // Stereo 16-bit output: each frame = L + R = 4 bytes
   int16_t stereoBuffer[512];
 
   uint32_t remaining = wav.dataSize;
@@ -341,7 +436,6 @@ bool playWav(const char* path) {
     remaining -= bytesRead;
 
     if (wav.numChannels == 1) {
-      // Mono -> duplicate to left and right
       size_t samples  = bytesRead / 2;
       size_t outIndex = 0;
 
@@ -349,8 +443,8 @@ bool playWav(const char* path) {
         int16_t sample = ((int16_t*)inputBuffer)[i];
         sample = applyVolume(sample);
 
-        stereoBuffer[outIndex++] = sample; // left
-        stereoBuffer[outIndex++] = sample; // right
+        stereoBuffer[outIndex++] = sample;
+        stereoBuffer[outIndex++] = sample;
 
         if (outIndex >= 512) {
           size_t bytesWritten;
@@ -364,7 +458,6 @@ bool playWav(const char* path) {
         i2s_write(I2S_PORT, stereoBuffer, outIndex * sizeof(int16_t), &bytesWritten, portMAX_DELAY);
       }
     } else {
-      // Stereo: apply volume in-place
       size_t samples    = bytesRead / 2;
       int16_t* samples16 = (int16_t*)inputBuffer;
       for (size_t i = 0; i < samples; i++) {
@@ -387,7 +480,6 @@ bool playWav(const char* path) {
 // HTTP ROUTES
 // =========================
 
-// Strict whitelist — never build a path from raw user input.
 String safeMessageToPath(String msg) {
   msg.trim();
   if (msg == "moins_fort")           return "/moins_fort.wav";
@@ -423,9 +515,9 @@ void handlePlay() {
     return;
   }
 
-  // Send HTTP response before playing so the browser is not left waiting.
   server.send(200, "text/plain", "Playing: " + msg);
   delay(20);
+  incrementLog();
   playWav(path.c_str());
 }
 
@@ -433,9 +525,68 @@ void handleStatus() {
   String json = "{";
   json += "\"wifi\":true,";
   json += "\"ip\":\"" + WiFi.localIP().toString() + "\",";
-  json += "\"playing\":" + String(isPlaying ? "true" : "false");
+  json += "\"playing\":" + String(isPlaying ? "true" : "false") + ",";
+  json += "\"volume\":" + String(VOLUME, 2);
   json += "}";
   server.send(200, "application/json", json);
+}
+
+void handleVolume() {
+  if (!server.hasArg("value")) {
+    server.send(400, "text/plain", "Missing parameter: value");
+    return;
+  }
+  float v = server.arg("value").toFloat();
+  if (v < 0.0f || v > 3.0f) {
+    server.send(400, "text/plain", "value must be 0.0-3.0");
+    return;
+  }
+  VOLUME = v;
+  Serial.printf("Volume set to %.2f\n", VOLUME);
+  server.send(200, "text/plain", "Volume: " + String(VOLUME, 2));
+}
+
+void handleLog() {
+  String html = "<!doctype html><html lang='fr'><head>"
+    "<meta charset='utf-8'><title>Journal</title>"
+    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<style>"
+    "body{font-family:system-ui,sans-serif;background:#111;color:#f5f5f5;margin:0;padding:20px}"
+    "h1{font-size:1.5rem}a{color:#2f80ed}"
+    "table{border-collapse:collapse;width:100%;max-width:400px;margin-top:16px}"
+    "th,td{padding:10px 16px;text-align:left;border-bottom:1px solid #333}"
+    "th{color:#bbb;font-weight:500}"
+    "td:last-child{text-align:right;font-weight:bold}"
+    "</style></head><body>"
+    "<h1>Journal des messages</h1>"
+    "<p><a href='/'>← Retour</a></p>";
+
+  File f = LittleFS.open(LOG_FILE, "r");
+  if (!f || f.size() == 0) {
+    html += "<p style='color:#bbb'>Aucun message envoyé pour l'instant.</p>";
+  } else {
+    // Collect lines into an array (most recent first)
+    String lines[64];
+    int count = 0;
+    while (f.available() && count < 64) {
+      String line = f.readStringUntil('\n');
+      line.trim();
+      if (line.length() > 0) lines[count++] = line;
+    }
+    f.close();
+
+    html += "<table><tr><th>Date</th><th>Messages</th></tr>";
+    for (int i = count - 1; i >= 0; i--) {
+      int sp = lines[i].indexOf(' ');
+      String date  = sp > 0 ? lines[i].substring(0, sp) : lines[i];
+      String cnt   = sp > 0 ? lines[i].substring(sp + 1) : "?";
+      html += "<tr><td>" + date + "</td><td>" + cnt + "</td></tr>";
+    }
+    html += "</table>";
+  }
+
+  html += "</body></html>";
+  server.send(200, "text/html; charset=utf-8", html);
 }
 
 void handleNotFound() {
@@ -477,6 +628,22 @@ void setup() {
   Serial.println();
   Serial.printf("Connected. IP: %s\n", WiFi.localIP().toString().c_str());
 
+  // NTP time sync (France timezone, DST-aware)
+  configTzTime("CET-1CEST,M3.5.0,M10.5.0/3", "pool.ntp.org");
+  Serial.print("Syncing time");
+  struct tm timeinfo;
+  for (int i = 0; i < 10 && !getLocalTime(&timeinfo); i++) {
+    delay(500);
+    Serial.print(".");
+  }
+  if (getLocalTime(&timeinfo)) {
+    char buf[32];
+    strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &timeinfo);
+    Serial.printf("\nTime: %s\n", buf);
+  } else {
+    Serial.println("\nTime sync failed (log dates will show 'unknown').");
+  }
+
   if (MDNS.begin(MDNS_NAME)) {
     Serial.printf("mDNS active: http://%s.local\n", MDNS_NAME);
     MDNS.addService("http", "tcp", 80);
@@ -489,6 +656,8 @@ void setup() {
   server.on("/",       HTTP_GET, handleRoot);
   server.on("/play",   HTTP_GET, handlePlay);
   server.on("/status", HTTP_GET, handleStatus);
+  server.on("/volume", HTTP_GET, handleVolume);
+  server.on("/log",    HTTP_GET, handleLog);
   server.onNotFound(handleNotFound);
 
   server.begin();
